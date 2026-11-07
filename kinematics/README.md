@@ -12,7 +12,20 @@ python3 kinematics/server.py
 
 Open `http://127.0.0.1:8765`. The server uses only Python's standard library. Choose a different loopback port with `--port 8766` if needed.
 
+## Accounts and permissions
+
+On the first start, run `python3 kinematics/account_setup.py` and open the printed **private, single-use** link. Choose the sole administrator’s email and password there. Do not share that link with students. Setup uses a random credential stored as a hash in SQLite; its plaintext file is owner-readable and gitignored, and is removed on successful setup. Registration never provisions an administrator, including the first registration. A unique database index prevents a second admin.
+
+Students use `/register`; all registrations are students regardless of submitted role fields. Sign in at `/login`. The administrator alone can open `/studio`, `/agents`, all authoring/review APIs, and the student account roster. Permissions are enforced by HTTP handlers and the course/reviewer services. `/work`, the tutor, released course material and personal progress remain available to students. Private data is keyed to the account, not the current browser cookie.
+
+`/profile` edits the name and explanation language, shows personal progress, and supports password changes with the current password. Passwords require 12–128 characters and are stored as salted scrypt hashes (N=32768, r=8, p=1). Random session cookies are HttpOnly, SameSite=Strict and expire after 14 days; only their hashes are stored. Sign-in rotates the cookie, logout revokes it, and a password change revokes other sessions. Authentication attempts are rate-limited in SQLite. The app remains HTTP loopback-only; HTTPS cookies, university SSO, email verification and account recovery are not implemented.
+
+Initial admin setup adopts pre-account authoring drafts and reviewer records. Only the setup browser’s previous personal progress/history transfers to the owner. Other old browser data stays private and is not adopted by student registrations. A private SQLite backup is recommended before migration; never commit runtime files.
+
 Pages:
+
+- `/login` and `/register`: sign in and student-only registration.
+- `/profile`: your profile and password; registered students are shown only to the admin.
 
 - `/` or `/course/physics-1`: visible course-level cards with saved checkpoint progress. Only Kinematics is playable; the other eight cards are proposed outlines, with Fluids marked as a source gap.
 - `/levels/kinematics`: lessons, checkpoints, original source pages and the boss.
@@ -27,7 +40,7 @@ Each file can be up to 25 MB. Choose Lecture, Practice, Past/proposed exam, Solu
 
 Course drafts and metadata persist in SQLite. Original uploaded bytes are stored privately under `var/private/kinematics/uploads/` using server-generated names. Upload checks validate extensions and file signatures/container markers; this is not full document parsing or malware scanning. Uploaded files have no public serving route and are not added to student retrieval automatically.
 
-Draft ownership uses the local browser session cookie. Another session cannot list, change or upload to your drafts. This is a local creator workspace, not university identity verification or institution-wide administrator access. Keep the same browser cookie to revisit your draft. Agent studio now connects local extraction, page confirmation, Kinematics structure drafts, lesson drafts, version-specific review and publication of a learning pack. These packs appear inside the existing Kinematics level; no other levels are created.
+Draft ownership uses the sole administrator’s account. Students cannot list, change or upload to course drafts. Sign in to the same admin account from another browser to continue authoring. Agent studio now connects local extraction, page confirmation, Kinematics structure drafts, lesson drafts, version-specific review and publication of a learning pack. These packs appear inside the existing Kinematics level; no other levels are created.
 
 Source previews are prepared separately using `pypdfium2` (the Codex bundled Python runtime already includes it):
 
@@ -47,7 +60,7 @@ If running outside the bundled runtime, install `pypdfium2` into a local virtual
 - Eighteen selected original lecture-page previews, served through an exact allowlist.
 - Explicit draft/provenance labels and no answer keys in the initial public content payload.
 
-The session is associated with a browser cookie, not an authenticated student account. Clearing the cookie creates a fresh session. This is not suitable for public or real cohort deployment. Bind remains loopback-only. Original solution PDFs, credentials and arbitrary filesystem paths are never served. The printed loopback URL is for this Mac only.
+Sessions resolve to authenticated accounts. Clearing a cookie signs you out; signing back in restores account data. This is not suitable for public deployment without HTTPS, identity verification and recovery. Bind remains loopback-only. Original solution PDFs, credentials and arbitrary filesystem paths are never served. The printed loopback URL is for this Mac only.
 
 Hints and feedback are withheld within a simulation until submission. This does not prevent consulting another tab or external resources and is not proctoring. Returning to the challenge overview preserves an attempt; reloading resumes the newest unfinished attempt. The deadline is checked on the server. On expiry only previously saved answers are assessed.
 
@@ -73,11 +86,11 @@ They also cover course-map availability, persistent course creation/uploads, ses
 
 Copy `.env.example` to `.env` if needed and save your key as `OPENAI_API_KEY`. Paid calls are currently disabled with `AI_PAID_CALLS_ENABLED=false` and `AI_EXECUTION_MODE=offline`. To deliberately enable live inference later, set both `AI_PAID_CALLS_ENABLED=true` and `AI_EXECUTION_MODE=live`. Do not overwrite a saved key with the example. Settings reload on each agent request. Queued offline tasks stay offline even if settings change later. Python standard-library HTTPS calls use the Responses API; no SDK installation is required.
 
-Default model: `gpt-6-luna`, reasoning disabled, 800 output tokens maximum. Its availability was verified with the user's project and a short live course-citation check. [Official model documentation](https://developers.openai.com/api/docs/models/gpt-6-luna) and [Responses API](https://developers.openai.com/api/docs/guides/text) were checked on 7 November 2026. Rates are explicitly allowlisted in `kinematics/ai.py`; an unpriced model fails closed. Recheck prices when changing models. The conservative meter includes an input premium for cache writes, and does not subtract cache-read discounts. It estimates usage rather than replacing provider billing.
+Default model: `gpt-6-luna`, low reasoning effort, 1,800 total output tokens maximum for the tutor (including internal reasoning). Its availability was verified with the user's project and a short live course-citation check. [Official model documentation](https://developers.openai.com/api/docs/models/gpt-6-luna) and [Responses API](https://developers.openai.com/api/docs/guides/text) were checked on 7 November 2026. Rates are explicitly allowlisted in `kinematics/ai.py`; an unpriced model fails closed. Recheck prices when changing models. The conservative meter includes an input premium for cache writes, and does not subtract cache-read discounts. It estimates usage rather than replacing provider billing.
 
 Current default allowances:
 
-- `AI_SESSION_BUDGET_USD=0.10`: lifetime of this browser cookie.
+- `AI_SESSION_BUDGET_USD=0.10`: lifetime of this account (the environment variable name is retained).
 - `AI_DAILY_BUDGET_USD=0.25`: all sessions combined, UTC day.
 - `AI_MONTHLY_BUDGET_USD=2.00`: all sessions combined, UTC calendar month.
 
@@ -94,14 +107,22 @@ Private chat and run records persist in the ignored SQLite database. Calls use `
 
 ## No-spend walkthrough
 
-1. Open Agent studio and choose this browser as the local demonstration reviewer. This first-claim role is suitable only for a local demo; keep that cookie. Other sessions cannot claim or approve as that reviewer.
+1. Use the private setup link to create your sole admin account, sign in, and open Agent studio. Your admin account is automatically the academic reviewer; students cannot claim that role.
 2. Create/upload a course in Course studio. Open its agent workflow and choose **Show course documents → Extract locally**.
 3. Compare an extracted page with **View original page**. Review its transcription and boundary. Confirm answer-free theory pages explicitly. Only lecture files without a solution flag can become official student evidence. Questions, mixed pages and solutions stay restricted.
 4. Propose a Kinematics structure. The offline result is a template for review, not a source-coverage guarantee. Remove unsupported units, edit objectives/citations, and approve the exact version.
 5. Draft one or all approved units. Review the theory, question, staged hints, candidate answer and rubric. Approve, then use the separate publish action. A published pack appears under **Reviewed additions** in the Kinematics level map. Source changes withdraw affected packs.
 6. Approve a checkpoint reference rubric in Agent studio. In My working, enter typed working or upload a PNG/JPEG/WebP/PDF (8 MB, PDFs up to three pages). Reader previews preserve native/typed text; offline handwriting must be transcribed manually. Confirm uncertainty checks and lock the snapshot before evaluation. Offline evaluation gives local numeric checks and a reasoning-review placeholder. It awards no AI XP or official grade.
-7. Curator runs only on eligible aggregate groups of at least five distinct browser sessions. A single-user demo reports insufficient data. Resource Scout fetches only the public HTTPS page you supply; offline relevance is a labeled review template. Neither publishes shared material automatically.
+7. Curator runs only on eligible aggregate groups of at least five distinct student accounts. A single-user demo reports insufficient data. Resource Scout fetches only the public HTTPS page you supply; offline relevance is a labeled review template. Neither publishes shared material automatically.
 
 Local extraction uses `pypdf`, `pypdfium2` and Pillow. PowerPoint text extraction uses the standard library. The app discovers the installed Codex Python runtime on this Mac; set `DOCUMENT_PYTHON` to another Python executable with those packages when moving the project. Extraction runs in a subprocess with a time limit, page/size limits and no OpenAI credentials.
 
-Coarse study-time intervals and structured question-help signals stay local. Cohort display suppresses groups below five browser sessions, which are not verified student identities. An explicit wrong-reference report can create a reviewer clarification ticket immediately. Private notes, chat text and handwritten work do not enter cohort model inputs. Sharing a disputed submission with the reviewer requires a separate student consent checkbox.
+Coarse study-time intervals and structured question-help signals stay local. Cohort display suppresses groups below five signed-in student accounts. Self-registration is not university identity verification. An explicit wrong-reference report can create a reviewer clarification ticket immediately. Private notes, chat text and handwritten work do not enter cohort model inputs. Sharing a disputed submission with the reviewer requires a separate student consent checkbox.
+
+## Current live configuration
+
+The owner explicitly enabled paid calls on 7 November 2026. The private `.env` now has `AI_PAID_CALLS_ENABLED=true`, `AI_EXECUTION_MODE=live`, `OPENAI_TUTOR_MODEL=gpt-6-luna`, and `AI_REASONING_EFFORT=low`. The API key is unchanged and never tracked. `.env.example` remains offline by default. Existing budget caps are unchanged.
+
+GPT-6 Luna is the recommended starting model for this cost-sensitive Kinematics prototype: it supports text/image input, structured outputs and adjustable reasoning at $0.10 input / $0.50 output per million tokens under standard short-context pricing. See the [official model specification](https://developers.openai.com/api/docs/models/gpt-6-luna). This is a workload/cost choice, not a benchmark claim that it is the most accurate physics model. Stronger models are not selected or retried automatically.
+
+The gateway sends low reasoning effort for all roles, reserves for the entire output allowance, and meters all reported output tokens, including reasoning. Unknown models and unsupported reasoning configurations fail before dispatch. Limits and no-auto-retry behavior remain enforced. Two tiny synthetic live checks validate API access, structured numeric output, elementary kinematics and an English/Italian explanation; they do not validate real handwriting accuracy or exam-level grading.

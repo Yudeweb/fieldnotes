@@ -26,11 +26,13 @@ class Studio:
             db.execute('CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, course TEXT NOT NULL, payload TEXT NOT NULL)')
 
     def list(self, owner):
+        if getattr(self.store,'auth',None):self.store.auth.require_admin(owner)
         with self.store.connect() as db:
             rows = db.execute('SELECT payload FROM courses WHERE owner=? ORDER BY rowid DESC', (owner,)).fetchall()
         return [json.loads(r[0]) for r in rows]
 
     def get(self, owner, course):
+        if getattr(self.store,'auth',None):self.store.auth.require_admin(owner)
         with self.store.connect() as db:
             row = db.execute('SELECT payload FROM courses WHERE id=? AND owner=?', (course, owner)).fetchone()
             if not row:
@@ -39,6 +41,7 @@ class Studio:
         return json.loads(row[0]) | {'documents': [json.loads(r[0]) for r in documents]}
 
     def create(self, owner, data):
+        if getattr(self.store,'auth',None):self.store.auth.require_admin(owner)
         def text(key, default, maximum):
             value = data.get(key, default)
             if not isinstance(value, str) or not value.strip() or len(value) > maximum:

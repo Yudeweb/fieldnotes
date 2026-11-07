@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Physics I · Fieldnotes</title><meta name="description" content="Explore your Physics I course, track level progress and build a course from official documents.">
-  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/game.css"><link rel="stylesheet" href="/tutor.css"><script defer src="/game.js"></script><script defer src="/app.js"></script><link rel="stylesheet" href="/agents.css"><script defer src="/agents.js"></script><script defer src="/portal.js"></script><script defer src="/tutor.js"></script>
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/game.css"><link rel="stylesheet" href="/tutor.css"><link rel="stylesheet" href="/auth.css"><script defer src="/game.js"></script><script defer src="/app.js"></script><script defer src="/auth.js"></script><link rel="stylesheet" href="/agents.css"><script defer src="/agents.js"></script><script defer src="/portal.js"></script><script defer src="/tutor.js"></script>
 </head>
-<body>
+<body data-auth="loading">
+  <div id="auth-screen" hidden></div>
   <a class="skip" href="#main">Skip to content</a>
   <aside class="sidebar">
     <a class="brand" href="/course/physics-1" aria-label="Physics I home"><span class="brand-mark">φ</span><span>fieldnotes<span class="brand-sub">A LITTLE MOMENTUM, EVERY DAY.</span></span></a>
     <div class="nav-caption">WORKSPACE</div>
-    <nav class="primary-nav" aria-label="Workspace pages"><button data-route="/course/physics-1"><span>▦</span> Course overview</button><button data-route="/levels/kinematics"><span>↗</span> Kinematics level</button><button data-route="/studio"><span>⊞</span> Course studio</button><button data-route="/agents"><span>✦</span> Agent studio</button><button data-route="/work"><span>✎</span> My working</button></nav>
+    <nav class="primary-nav" aria-label="Workspace pages"><button data-route="/course/physics-1"><span>▦</span> Course overview</button><button data-route="/levels/kinematics"><span>↗</span> Kinematics level</button><button data-route="/studio" data-admin-only hidden><span>⊞</span> Course studio</button><button data-route="/agents" data-admin-only hidden><span>✦</span> Agent studio</button><button data-route="/work"><span>✎</span> My working</button><button data-route="/profile"><span>◎</span> My profile</button></nav>
     <div class="course-label">PHYSICS I <span>01</span></div>
     <h2 id="sidebar-title">Your next leap.</h2><p class="sidebar-intro" id="sidebar-description">Small steps.<br>Big ideas.</p>
     <nav id="lesson-nav" aria-label="Learning units"></nav>
@@ -18,7 +19,7 @@
     <div class="sidebar-bottom"><span class="status-dot"></span> Local prototype<span class="small">Draft content · your review pending</span></div>
   </aside>
   <div class="workspace">
-    <header class="topbar"><span class="breadcrumb" id="breadcrumb">My learning <span>/</span> Physics I</span><div class="top-right"><span class="preview-tag">LOCAL PREVIEW</span><span class="xp" id="xp">✦ 0 XP</span><span class="avatar" title="Local learner">Y</span></div></header>
+    <header class="topbar"><span class="breadcrumb" id="breadcrumb">My learning <span>/</span> Physics I</span><div class="top-right"><span class="preview-tag" id="account-role">STUDENT</span><span class="xp" id="xp">✦ 0 XP</span><button class="avatar" id="profile-avatar" data-route="/profile" aria-label="Open your profile">?</button><button class="sign-out" data-sign-out>Sign out</button></div></header>
     <main id="main" tabindex="-1">
       <div id="learning-chrome" hidden>
       <section class="hero"><div><div class="eyebrow">THE SCIENCE OF MOTION</div><h1>First, find your bearings.</h1><p>From a change in position to a path through space.<br>Take it step by step, or show what you already know.</p></div><div class="orbit-art" aria-hidden="true"><svg viewBox="0 0 240 160"><path d="M15 129 Q91 -57 220 118" class="orbit-path"/><path d="M20 136H224M30 145V21" class="axes"/><circle cx="124" cy="37" r="9"/><path d="M124 37l48 11m-10-10 10 10-13 5" class="vector"/><path d="M124 37v47m-7-9 7 9 7-9" class="gravity"/><text x="181" y="49">v</text><text x="135" y="83">g</text><text x="218" y="152">x</text></svg></div></section>

@@ -60,6 +60,7 @@ def settings():
             return 0
     return {'key': values.get('OPENAI_API_KEY', ''), 'enabled': values.get('AI_PAID_CALLS_ENABLED', 'false').lower() == 'true' and values.get('AI_EXECUTION_MODE','live').lower() == 'live',
             'model': values.get('OPENAI_TUTOR_MODEL') or 'gpt-6-luna',
+            'reasoning_effort': values.get('AI_REASONING_EFFORT','low').lower(),
             'session_cap': allowance('AI_SESSION_BUDGET_USD', '.10'), 'day_cap': allowance('AI_DAILY_BUDGET_USD', '.25'),
             'month_cap': allowance('AI_MONTHLY_BUDGET_USD', '2')}
 
@@ -111,11 +112,17 @@ class Tutor:
         if not isinstance(raw, dict):
             raise AIError('Invalid page context.')
         page = raw.get('page', 'course')
-        if page not in ('course', 'level', 'studio'):
+        if page not in ('course', 'level', 'studio', 'profile'):
             raise AIError('Unknown page.')
+        if page=='studio' and getattr(self.store,'auth',None):self.store.auth.require_admin(owner)
         result = {'page': page, 'course': 'Physics I', 'playable_level': 'Kinematics only',
                   'knowledge': 'Unknown; numeric checkpoint evidence is not a full reasoning assessment.',
                   'checkpoint_evidence': state['checks']}
+        if page=='profile' and getattr(self.store,'auth',None):
+            user=self.store.auth.user(owner)
+            result['profile']={'role':user['role'],'explanation_language':user['language'],
+                               'editable_fields':['name','explanation language'],
+                               'password_change':'Current password required; other sessions are signed out.'}
         if page == 'studio' and raw.get('course') and getattr(self, 'studio', None):
             if not isinstance(raw['course'], str) or not re.fullmatch(r'[a-f0-9]{24}', raw['course']):
                 raise AIError('Unknown course draft.')
@@ -191,7 +198,7 @@ class Tutor:
             answer='Offline preview: paid AI calls are disabled. '
             answer+=('Current topic: '+lesson['title']+'. '+lesson['objective']+' '+lesson['body'][0]) if lesson else 'Choose a Kinematics theory unit or checkpoint. You can read the course notes and submit work for local checks without API spending.'
             return {'answer':answer,'citations':[]}
-        generated=self.gateway.generate(owner,request_id,'tutor',INSTRUCTIONS,prompt,SCHEMA,offline,max_output=800,fingerprint=fingerprint)
+        generated=self.gateway.generate(owner,request_id,'tutor',INSTRUCTIONS,prompt,SCHEMA,offline,max_output=1800,fingerprint=fingerprint)
         parsed=generated['result'];allowed={c['key']:c for c in evidence}
         citations=[allowed[k] for k in dict.fromkeys(parsed['citations']) if k in allowed]
         result={'question':message,'answer':parsed['answer'][:10000],'citations':[{k:c[k] for k in ('source','page','title','url','authority') if k in c} for c in citations],

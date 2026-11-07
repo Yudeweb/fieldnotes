@@ -1,5 +1,6 @@
 import json
 import math
+import secrets
 import sys
 import tempfile
 import threading
@@ -18,6 +19,8 @@ class KinematicsTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp=tempfile.TemporaryDirectory()
         cls.server=make_server(0,Path(cls.tmp.name)/'test.sqlite',Path(cls.tmp.name)/'uploads')
+        setup=json.loads(cls.server.auth.setup_file.read_text())['token']
+        cls.server.auth.setup({'token':setup,'name':'Test owner','email':'owner@example.test','password':'test-only-owner-password'},'old-browser')
         cls.thread=threading.Thread(target=cls.server.serve_forever,daemon=True)
         cls.thread.start()
         cls.url=f'http://127.0.0.1:{cls.server.server_port}'
@@ -29,6 +32,18 @@ class KinematicsTests(unittest.TestCase):
     def setUp(self):
         import http.cookiejar
         self.client=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.request('/api/auth/register',{'name':'Test student','email':secrets.token_hex(8)+'@example.test','password':'test-only-student-password'})
+
+    def student_client(self):
+        import http.cookiejar
+        client=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.request('/api/auth/register',{'name':'Another student','email':secrets.token_hex(8)+'@example.test','password':'test-only-student-password'},client)
+        return client
+
+    def admin_login(self):
+        self.request('/api/auth/logout',{})
+        status,_=self.request('/api/auth/login',{'email':'owner@example.test','password':'test-only-owner-password'})
+        self.assertEqual(status,200)
 
     def request(self,path,data=None,client=None):
         headers={'X-Local-Request':'1','Content-Type':'application/json'}
@@ -69,7 +84,7 @@ class KinematicsTests(unittest.TestCase):
 
     def test_browser_sessions_are_isolated(self):
         self.request('/api/notes',{'notes':'Private local note'})
-        other=urllib.request.build_opener()
+        other=self.student_client()
         _,s=self.request('/api/state',client=other)
         self.assertEqual(s['notes'],'')
 
@@ -95,7 +110,7 @@ class KinematicsTests(unittest.TestCase):
 
     def test_another_session_cannot_read_boss_attempt(self):
         _,b=self.request('/api/boss/start',{'mode':'practice'})
-        status,_=self.request('/api/boss/'+b['id'],client=urllib.request.build_opener())
+        status,_=self.request('/api/boss/'+b['id'],client=self.student_client())
         self.assertEqual(status,404)
 
     def test_expired_simulation_uses_saved_work_not_late_answers(self):
@@ -136,6 +151,7 @@ class KinematicsTests(unittest.TestCase):
             with e:return e.code,json.load(e)
 
     def create_course(self):
+        self.admin_login()
         status,course=self.request('/api/studio/courses',{'title':'Physics I test','code':'PHY-1','language':'English','description':'Kinematics source review'})
         self.assertEqual(status,201)
         return course
@@ -157,15 +173,15 @@ class KinematicsTests(unittest.TestCase):
         status,_=self.request('/uploads/'+document['id']+'.pdf')
         self.assertEqual(status,404)
 
-    def test_course_drafts_and_uploads_are_session_owned(self):
+    def test_course_drafts_and_uploads_are_admin_only(self):
         course=self.create_course();self.upload(course['id'])
-        other=urllib.request.build_opener()
+        other=self.student_client()
         status,_=self.request('/api/studio/courses/'+course['id'],client=other)
-        self.assertEqual(status,404)
-        _,listing=self.request('/api/studio/courses',client=other)
-        self.assertEqual(listing['courses'],[])
+        self.assertEqual(status,403)
+        status,_=self.request('/api/studio/courses',client=other)
+        self.assertEqual(status,403)
         status,_=self.upload(course['id'],client=other)
-        self.assertEqual(status,400)
+        self.assertEqual(status,403)
 
     def test_upload_rejects_spoofed_type_path_and_duplicates(self):
         course=self.create_course()
@@ -182,6 +198,7 @@ class KinematicsTests(unittest.TestCase):
         self.assertEqual(status,200);self.assertTrue(result['contains_solutions'])
 
     def test_deep_page_routes_load_application_shell(self):
+        self.admin_login()
         for path in ('/','/course/physics-1','/levels/kinematics','/studio'):
             with self.client.open(self.url+path) as response:
                 self.assertEqual(response.status,200)
@@ -201,7 +218,7 @@ class KinematicsTests(unittest.TestCase):
         status,result=self.request('/api/tutor/messages',message)
         self.assertEqual(status,200);self.assertIn('distance',result['answer'])
         _,history=self.request('/api/tutor');self.assertEqual(len(history['messages']),1)
-        _,other=self.request('/api/tutor',client=urllib.request.build_opener());self.assertEqual(other['messages'],[])
+        _,other=self.request('/api/tutor',client=self.student_client());self.assertEqual(other['messages'],[])
         _,grade=self.request('/api/check',{'id':'cp1','answers':{'distance':7,'displacement':5,'speed':1.4}})
         self.assertTrue(grade['assisted']);self.assertEqual(grade['state']['xp'],10)
         _,attempt=self.request('/api/boss/start',{'mode':'simulation'})
@@ -212,8 +229,8 @@ class KinematicsTests(unittest.TestCase):
     def test_tutor_cannot_access_another_sessions_course_metadata(self):
         self.mock_tutor();course=self.create_course()
         message={'id':'studio-context-test-0001','message':'Describe this course draft','context':{'page':'studio','course':course['id']}}
-        status,_=self.request('/api/tutor/messages',message,client=urllib.request.build_opener())
-        self.assertEqual(status,400)
+        status,_=self.request('/api/tutor/messages',message,client=self.student_client())
+        self.assertEqual(status,403)
         status,result=self.request('/api/tutor/messages',message)
         self.assertEqual(status,200);self.assertIn('answer',result)
 

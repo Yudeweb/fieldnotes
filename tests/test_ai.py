@@ -36,7 +36,19 @@ class TutorTests(unittest.TestCase):
         self.assertNotIn('solution',json.dumps(prompt))
         self.assertNotIn('notes',prompt['page_context'])
         self.assertFalse(self.calls[0]['store'])
-        self.assertEqual(self.calls[0]['max_output_tokens'],800)
+        self.assertEqual(self.calls[0]['max_output_tokens'],1800)
+        self.assertEqual(self.calls[0]['reasoning'],{'effort':'low'})
+
+    def test_reasoning_configuration_is_validated_and_bound_to_run_id(self):
+        self.config['reasoning_effort']='unsupported'
+        with self.assertRaises(AIError):self.ask()
+        self.assertEqual(self.calls,[])
+        self.config['reasoning_effort']='low';self.ask()
+        self.config['reasoning_effort']='medium'
+        with self.assertRaises(AIError):self.ask()
+        self.assertEqual(len(self.calls),1)
+        self.ask(data=self.data|{'id':'message-id-medium-0002'})
+        self.assertEqual(self.calls[-1]['reasoning'],{'effort':'medium'})
 
     def test_changed_message_cannot_reuse_id(self):
         self.ask()

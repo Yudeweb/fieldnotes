@@ -18,6 +18,7 @@ from catalogue import course_catalogue
 from studio import MAX_UPLOAD, Studio, StudioError
 from ai import Tutor, AIError
 from agents import Workflows, WorkflowError
+from auth import Accounts, AuthError, SESSION_SECONDS
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT.parent / 'var/private/kinematics'
@@ -118,14 +119,41 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Referrer-Policy','no-referrer')
         self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
         if getattr(self,'new_cookie',None):
-            self.send_header('Set-Cookie',f'physics_session={self.new_cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000')
+            self.send_header('Set-Cookie',f'physics_session={self.new_cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_SECONDS}')
         self.end_headers();self.wfile.write(data)
+
+    def redirect(self, location):
+        self.send_response(303)
+        self.send_header('Location',location)
+        self.send_header('Cache-Control','no-store')
+        self.send_header('Content-Length','0')
+        self.end_headers()
+
+    def access(self, path, user):
+        if not user:
+            raise AuthError('Sign in to continue.',401)
+        if path.startswith(('/api/studio','/api/agents','/api/admin')):
+            self.server.auth.require_admin(user['id'])
+        return user['id']
 
     def do_GET(self):
         self.new_cookie=None
         if not self.valid_host(): return self.send(403,{'error':'Local host required.'})
-        sid=self.session();path=urlparse(self.path).path
+        token_hash=self.session();path=urlparse(self.path).path
+        user=self.server.auth.current(token_hash)
+        if path=='/api/auth':return self.send(200,{'user':user})
+        if path.startswith(('/api/','/source/')):
+            try:sid=self.access(path,user)
+            except AuthError as e:return self.send(e.status,{'error':str(e)})
+        else:sid=user['id'] if user else None
+        protected_page=path in ('/','/course/physics-1','/levels/kinematics','/agents','/work','/profile') or path=='/studio' or path.startswith('/studio/')
+        if protected_page and not user:return self.redirect('/login')
+        if user and path in ('/login','/register'):return self.redirect('/course/physics-1')
+        if (path=='/agents' or path=='/studio' or path.startswith('/studio/')) and user['role']!='admin':
+            return self.send(403,b'<!doctype html><title>Administrator access required</title><h1>This workspace is for the administrator.</h1><p><a href="/course/physics-1">Return to your course</a></p>','text/html; charset=utf-8')
         try:
+            if path=='/api/admin/students':return self.send(200,{'students':self.server.auth.students()})
+            if path=='/api/workspace':return self.send(200,self.server.workflows.dashboard(sid,personal=True))
             if path=='/api/agents':return self.send(200,self.server.workflows.dashboard(sid))
             if path.startswith('/api/jobs/'):return self.send(200,self.server.workflows.job(sid,path.split('/')[-1]))
             if path.startswith('/api/agents/records/'):
@@ -163,7 +191,7 @@ class Handler(BaseHTTPRequestHandler):
             file=DATA/'source-pages'/f'{key}-{page}.png'
             if not file.is_file():return self.send(404,{'error':'Run the source-preview preparation script first.'})
             return self.send(200,file.read_bytes(),'image/png')
-        assets={'/':'index.html','/course/physics-1':'index.html','/levels/kinematics':'index.html','/studio':'index.html','/agents':'index.html','/work':'index.html','/app.js':'app.js','/portal.js':'portal.js','/tutor.js':'tutor.js','/game.js':'game.js','/agents.js':'agents.js','/agents.css':'agents.css','/style.css':'style.css','/portal.css':'portal.css','/game.css':'game.css','/tutor.css':'tutor.css'}
+        assets={'/':'index.html','/course/physics-1':'index.html','/levels/kinematics':'index.html','/studio':'index.html','/agents':'index.html','/work':'index.html','/profile':'index.html','/login':'index.html','/register':'index.html','/setup':'index.html','/auth.js':'auth.js','/auth.css':'auth.css','/app.js':'app.js','/portal.js':'portal.js','/tutor.js':'tutor.js','/game.js':'game.js','/agents.js':'agents.js','/agents.css':'agents.css','/style.css':'style.css','/portal.css':'portal.css','/game.css':'game.css','/tutor.css':'tutor.css'}
         if path.startswith('/studio/') and len(path.split('/'))==3: assets[path]='index.html'
         if path in assets:
             f=WEB/assets[path]
@@ -178,7 +206,23 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin not in (f'http://localhost:{self.server.server_port}',f'http://127.0.0.1:{self.server.server_port}'):
             return self.send(403,{'error':'Origin not allowed.'})
         try:
-            sid=self.session();parsed=urlparse(self.path);path=parsed.path
+            token_hash=self.session();parsed=urlparse(self.path);path=parsed.path
+            user=self.server.auth.current(token_hash)
+            if path in ('/api/auth/register','/api/auth/login','/api/auth/setup','/api/auth/logout'):
+                length=int(self.headers.get('Content-Length','0'))
+                if length<=0 or length>8000:raise Invalid('Invalid account request size.')
+                data=json.loads(self.rfile.read(length))
+                if not isinstance(data,dict):raise Invalid('Expected an object.')
+                if path=='/api/auth/logout':
+                    self.server.auth.logout(token_hash);self.new_cookie=secrets.token_hex(32)
+                    return self.send(200,{'signed_out':True})
+                if user:raise AuthError('Sign out before using a different account.',409)
+                action=path.split('/')[-1]
+                email=data.get('email','')
+                self.server.auth.limit(action,self.client_address[0],email[:254].strip().casefold() if isinstance(email,str) else '')
+                account,self.new_cookie=getattr(self.server.auth,action)(data,token_hash)
+                return self.send(201 if action!='login' else 200,{'user':account})
+            sid=self.access(path,user)
             length=int(self.headers.get('Content-Length','0'))
             if path=='/api/work/upload':
                 if length<=0 or length>8*1024*1024:raise Invalid('Student work must be up to 8 MB.')
@@ -198,6 +242,11 @@ class Handler(BaseHTTPRequestHandler):
             if length<0 or length>64000:raise Invalid('Request is too large.')
             data=json.loads(self.rfile.read(length))
             if not isinstance(data,dict):raise Invalid('Expected an object.')
+            if path=='/api/profile':return self.send(200,{'user':self.server.auth.update(sid,data)})
+            if path=='/api/profile/password':
+                self.server.auth.limit('password',self.client_address[0],user['email'])
+                self.new_cookie=self.server.auth.change_password(sid,data)
+                return self.send(200,{'saved':True})
             if path=='/api/agents/reviewer':return self.send(200,self.server.workflows.claim(sid))
             if path=='/api/agents/rubrics':return self.send(201,self.server.workflows.approve_rubric(sid,data))
             if path=='/api/agents/curate':return self.send(202,self.server.workflows.queue(sid,'curator',data))
@@ -255,6 +304,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,result)
             result=self.server.store.update(sid,lambda s:self.mutate(path,data,s))
             return self.send(200,result)
+        except AuthError as e:
+            return self.send(e.status,{'error':str(e)})
         except (Invalid,StudioError,ValueError,TypeError,KeyError) as e:
             return self.send(400,{'error':str(e) if isinstance(e,(Invalid,StudioError,AIError,WorkflowError)) else 'Invalid request.'})
 
@@ -338,6 +389,8 @@ def make_server(port=8765,db=None,upload_directory=None,start_workers=True):
     server.tutor.studio=server.studio
     server.workflows=Workflows(server.store,server.studio,server.tutor.gateway,grade,directory=Path(server.store.file).parent/'work')
     server.tutor.workflows=server.workflows
+    server.auth=Accounts(server.store)
+    server.store.auth=server.auth
     if start_workers:server.workflows.start()
     return server
 
@@ -346,5 +399,6 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=8765)
     server=make_server(parser.parse_args().port)
     print(f'Kinematics local demo: http://127.0.0.1:{server.server_port}',flush=True)
+    if server.auth.setup_file.exists():print('Administrator setup is private. Run: python3 kinematics/account_setup.py',flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:server.server_close()

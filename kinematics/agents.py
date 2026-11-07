@@ -81,10 +81,18 @@ class Workflows:
             if not self.run_next():self.wake.wait(1);self.wake.clear()
 
     def reviewer(self,owner,required=True):
+        if getattr(self.store,'auth',None):
+            user=self.store.auth.user(owner)
+            is_admin=bool(user and user['role']=='admin')
+            if required and not is_admin:raise WorkflowError('Only the administrator can review and publish course material.')
+            return {'claimed':True,'is_reviewer':is_admin}
         with self.store.connect() as db:row=db.execute("SELECT value FROM agent_settings WHERE key='reviewer'").fetchone()
         if required and (not row or row[0]!=owner):raise WorkflowError('This action requires the local reviewer browser.')
         return {'claimed':bool(row),'is_reviewer':bool(row and row[0]==owner)}
     def claim(self,owner):
+        if getattr(self.store,'auth',None):
+            self.store.auth.require_admin(owner)
+            return self.reviewer(owner)
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE');row=db.execute("SELECT value FROM agent_settings WHERE key='reviewer'").fetchone()
             if row and row[0]!=owner:raise WorkflowError('A different browser is already the local reviewer.')
@@ -139,6 +147,7 @@ class Workflows:
     def queue(self,owner,role,data,course=''):
         self.ensure_help(owner)
         if role not in ROLES:raise WorkflowError('Unknown agent task.')
+        if role=='source_reader' and getattr(self.store,'auth',None):self.store.auth.require_admin(owner)
         if course:self.studio.get(owner,course)
         if role in ('builder_structure','builder_content','curator','scout'):self.reviewer(owner)
         id=data.get('id')
@@ -163,6 +172,9 @@ class Workflows:
             db.execute("UPDATE agent_jobs SET status='running',updated=? WHERE id=?",(time.time(),row[0]))
         id,owner,role,course,encoded=row;data=json.loads(encoded)
         try:
+            if getattr(self.store,'auth',None):
+                if not self.store.auth.user(owner):raise WorkflowError('Sign in before starting this task again.')
+                if role=='source_reader':self.store.auth.require_admin(owner)
             self.ensure_help(owner)
             if course:self.studio.get(owner,course)
             if role in ('builder_structure','builder_content','curator','scout'):self.reviewer(owner)
@@ -386,10 +398,12 @@ class Workflows:
         return {'saved':True}
     def aggregates(self):
         groups=[]
+        accounts=bool(getattr(self.store,'auth',None))
+        eligible="owner IN (SELECT id FROM users WHERE role='student')" if accounts else '1=1'
         with self.store.connect() as db:
-            rows=db.execute('SELECT session,payload FROM state').fetchall()
-            signals=db.execute('SELECT question,category,COUNT(DISTINCT owner) FROM cohort_signals GROUP BY question,category HAVING COUNT(DISTINCT owner)>=5').fetchall()
-            timing=db.execute('SELECT question,owner,SUM(seconds) FROM study_time GROUP BY question,owner').fetchall()
+            rows=db.execute("SELECT session,payload FROM state"+(" WHERE session IN (SELECT id FROM users WHERE role='student')" if accounts else '')).fetchall()
+            signals=db.execute(f'SELECT question,category,COUNT(DISTINCT owner) FROM cohort_signals WHERE {eligible} GROUP BY question,category HAVING COUNT(DISTINCT owner)>=5').fetchall()
+            timing=db.execute(f'SELECT question,owner,SUM(seconds) FROM study_time WHERE {eligible} GROUP BY question,owner').fetchall()
         for key in CHECKPOINTS:
             attempted=set();wrong=set()
             for owner,payload in rows:
@@ -407,11 +421,11 @@ class Workflows:
         for key in CHECKPOINTS:
             values=[seconds for q,owner,seconds in timing if q==key]
             if len(values)>=5:times.append({'question':key,'sessions':len(values),'median_seconds':round(statistics.median(values))})
-        return {'minimum_group_size':5,'groups':groups,'signals':safe_signals,'study_time':times,'enough_data':bool(groups or safe_signals or times),'unit':'distinct browser sessions, not verified students'}
+        return {'minimum_group_size':5,'groups':groups,'signals':safe_signals,'study_time':times,'enough_data':bool(groups or safe_signals or times),'unit':'distinct student accounts (self-registered)' if accounts else 'distinct browser sessions, not verified students'}
     def curate(self,owner,id,course,data):
         aggregate=self.aggregates()
         if not aggregate['enough_data']:
-            return self.create(owner,'curation',{'faqs':[],'clarifications':[],'aggregate':aggregate,'message':'Insufficient cohort data: at least five distinct browser sessions per displayed group are required.','meta':{'execution':'local','cost_usd':0}},status='insufficient_data')
+            return self.create(owner,'curation',{'faqs':[],'clarifications':[],'aggregate':aggregate,'message':'Insufficient cohort data: at least five distinct learners per displayed group are required.','meta':{'execution':'local','cost_usd':0}},status='insufficient_data')
         ids={g['question'] for g in aggregate['groups']}|{g['question'] for g in aggregate['signals']}|{g['question'] for g in aggregate['study_time']}
         evidence=[]
         for l in LESSONS:
@@ -539,7 +553,8 @@ class Workflows:
         for owner,id in rows:
             if not self.reviewer(owner,False)['is_reviewer']:continue
             record=self.record(owner,id);p=record['payload']
-            with self.store.connect() as db:count=db.execute('SELECT COUNT(*) FROM resource_votes WHERE resource=?',(id,)).fetchone()[0]
+            eligible=" AND owner IN (SELECT id FROM users WHERE role='student')" if getattr(self.store,'auth',None) else ''
+            with self.store.connect() as db:count=db.execute('SELECT COUNT(*) FROM resource_votes WHERE resource=?'+eligible,(id,)).fetchone()[0]
             output.append({'id':id,**{k:p[k] for k in ('title','url','concept','relevance','level','cautions')},'authority':'Reviewed supplementary resource','helpful_sessions':count if count>=5 else None})
         return output
     def public_faqs(self):
@@ -562,8 +577,14 @@ class Workflows:
         with self.store.connect() as db:row=db.execute("SELECT value FROM agent_settings WHERE key='reviewer'").fetchone()
         if not row:raise WorkflowError('No local reviewer has been selected.')
         return self.create(row[0],'dispute',{'question':work['payload']['question'],'transcription':work['payload']['transcription'],'feedback':evaluation['payload']['feedback'],'reason':short(data.get('reason',''),2000),'consent':True},status='open')
-    def dashboard(self,owner):
+    def dashboard(self,owner,personal=False):
         reviewer=self.reviewer(owner,False);all_records=self.records(owner)
+        if personal:
+            return {'gateway':self.gateway.status(owner),'reviewer':{'claimed':True,'is_reviewer':False},
+                    'roles':{k:v for k,v in ROLES.items() if k in ('student_reader','evaluator')},
+                    'records':[{k:r[k] for k in ('id','course','kind','revision','status','payload','created')} for r in all_records if r['kind'] in ('work','evaluation')],
+                    'jobs':[j for j in self.jobs(owner) if j['role'] in ('student_reader','evaluator')],
+                    'aggregate':None,'resources':self.public_resources(),'rubrics':[]}
         return {'gateway':self.gateway.status(owner),'reviewer':reviewer,'roles':ROLES,
                 'records':[{k:r[k] for k in ('id','course','kind','revision','status','payload','created')} for r in all_records if r['kind']!='publication'],
                 'jobs':self.jobs(owner),'aggregate':self.aggregates() if reviewer['is_reviewer'] else None,'resources':self.public_resources(),

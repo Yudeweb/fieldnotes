@@ -6,7 +6,15 @@ A local web application with one playable **Kinematics** level, a game-style lea
 python3 kinematics/server.py
 ```
 
-Open [the local app](http://127.0.0.1:8765/). **Paid calls are disabled.** The saved API key stays private in `.env`. Offline previews, local file extraction and numeric checks work without API spending.
+On the first run, open your private single-use administrator setup link:
+
+```sh
+python3 kinematics/account_setup.py
+```
+
+Choose your admin email and password on that screen. You are the only administrator; the public `/register` page always creates a student. Students cannot access Course studio, Agent studio, their APIs, uploads, rubrics or review/publishing actions. `/profile` saves each account’s name and tutor language; private progress, notes, working and chat persist across logins. The admin profile lists registered students. The setup credential lives only in the ignored, owner-readable runtime folder and is removed after use.
+
+Open [the local app](http://127.0.0.1:8765/). **Paid calls are enabled in the owner’s local `.env`.** All six roles use GPT-6 Luna with low reasoning effort through one shared server-side key. Limits remain $0.10 per account, $0.25 per UTC day and $2 per UTC month across the application. Calls run only on explicit requests; native extraction and numeric checks remain local. `.env.example` keeps paid execution disabled for fresh checkouts.
 
 - **Course studio**: create a course and upload lecture, practice, exam and solution files.
 - **Agent studio**: choose the local reviewer, extract and confirm source pages, draft a Kinematics structure, review lessons/checkpoints, and publish a reviewed learning pack. Review rubrics, cohort proposals and outside resources here.
@@ -17,4 +25,4 @@ All six roles have workflow implementations: Reader, Builder, Tutor, Evaluator, 
 
 [Setup and limits](kinematics/README.md) · [Agent architecture and endpoints](docs/AGENT_WORKFLOWS.md) · [Original agent plan](docs/AI_AGENTS_IMPLEMENTATION_PLAN.md)
 
-This is a loopback-only, single-device prototype. Local reviewer bootstrap and browser-session ownership are not institutional authentication. Generated content and model feedback are not official course grades. No new academic content has been approved on your behalf in the main workspace.
+This is a loopback-only, single-device prototype. Accounts use local password authentication, not university SSO. Email verification and password recovery are not connected. Generated content and model feedback are not official course grades. No new academic content has been approved on your behalf in the main workspace.

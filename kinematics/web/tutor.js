@@ -7,6 +7,7 @@ function tutorContext(){const work=typeof page==='string'&&page==='work'&&typeof
 function updateTutorContext(){
  const context=tutorContext();let label='Physics I · course overview';
  if(context.page==='studio')label='Course studio · draft setup';
+ if(context.page==='profile')label='Your profile · learning preferences';
  if(context.page==='level'){
   const lesson=level?.lessons.find(l=>l.id===context.lesson);
   label=context.section==='learn'?`Kinematics · ${lesson?.title||'Theory'}`:context.section==='practice'?`Kinematics · ${context.checkpoint?level?.checkpoints[context.checkpoint]?.title:'Checkpoints'}`:context.section==='boss'?'Kinematics · level boss':context.section==='journey'?'Kinematics · level map':'Kinematics · review';
